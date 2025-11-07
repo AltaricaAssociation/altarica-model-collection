@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="ReliabilityBlockDiagrams">
+    <file path="ReliabilityBlockDiagrams.alt" name="ReliabilityBlockDiagrams.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

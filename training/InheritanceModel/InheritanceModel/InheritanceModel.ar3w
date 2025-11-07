@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="InheritanceModel">
+    <file path="InheritanceModel.alt" name="InheritanceModel.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

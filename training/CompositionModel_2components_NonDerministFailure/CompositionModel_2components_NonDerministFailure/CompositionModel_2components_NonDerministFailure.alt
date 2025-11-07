@@ -1,0 +1,20 @@
+class component
+  Boolean working (init = true);
+  event failure, repair;
+  transition
+      failure: working -> working := false;
+      repair: not working -> working := true;
+ end
+
+block TwoEngines
+
+	component A, B;
+	event individualFailure, CCF, repair;
+
+	transition
+		individualFailure: !A.failure | !B.failure;
+		CCF: ?A.failure & ?B.failure;
+		repair: !A.repair & !B.repair;
+	hide
+		A.failure, B.failure, A.repair, B.repair;
+end

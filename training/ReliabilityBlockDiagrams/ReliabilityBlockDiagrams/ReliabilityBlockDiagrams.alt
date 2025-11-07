@@ -1,0 +1,22 @@
+class BasicBlock
+	Boolean OK (init = true);
+	Boolean inFlow (reset = false);
+	Boolean outFlow (reset = false);
+	parameter Real lambda = 0.0001;
+	event failure (delay = exponential(lambda));
+	transition
+    	failure:  OK -> OK := false;
+	assertion
+    	if OK then outFlow := inFlow; 
+end
+
+class MyDiagram
+  BasicBlock A, B, C, D, E, F;
+assertion
+    A.inFlow := true;
+    B.inFlow := A.outFlow;
+    C.inFlow := B.outFlow;
+    D.inFlow := A.outFlow;
+    E.inFlow := D.outFlow;
+    F.inFlow := C.outFlow or E.outFlow;
+end

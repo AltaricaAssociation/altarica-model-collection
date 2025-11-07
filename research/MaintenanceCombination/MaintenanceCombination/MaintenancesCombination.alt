@@ -1,0 +1,370 @@
+/*
+ * =============================================================================
+ *  COPYRIGHT (c) 2014-2025 - AltaRica Association
+ * =============================================================================
+ *
+ *  Project: "MaintenanceCombination"
+ *
+ * =============================================================================
+ *  All rights reserved.
+ *  Unauthorized copying of this file, via any medium, is strictly prohibited.
+ *  The content of this file is proprietary and confidential.
+ * =============================================================================
+ */
+
+/*
+ * Mission time 175200 (hours => 20 years)
+ */
+
+domain PTCState {PTCS_OVERLOADED, PTCS_NOMINAL, PTCS_DEGRADED, PTCS_FAILED, PTCS_STOPPED}
+domain PTCMode {PTCM_OPERATION, PTCM_TEST}
+domain ExtractionControlMode {PTCCM_OPERATION, PTCCM_TEST, PTCCM_MAINTENANCE}
+
+
+class PeriodicallyTestedComponent
+	// Internal behavior
+	PTCState vsState (init = PTCS_NOMINAL); // PTCS_OVERLOADED | PTCS_NOMINAL | PTCS_DEGRADED | PTCS_FAILED | PTCS_STOPPED
+	PTCMode vsMode (init = PTCM_OPERATION); // PTCM_OPERATION | PTCM_TEST
+	PTCState vcFromSibling, vcToOther (reset = PTCS_NOMINAL); // PTCS_OVERLOADED | PTCS_NOMINAL | PTCS_DEGRADED | PTCS_FAILED | PTCS_STOPPED
+	parameter Real pFailure = 1.0e-5;
+	parameter Real pDegradation = 1.0e-3;
+	event evFailure (delay = exponential(pFailure));
+	event evDegradation  (delay = exponential(pDegradation));
+	event evOverload (delay = Dirac(0.0));
+	transition
+		evFailure: vsMode == PTCM_OPERATION and (vsState == PTCS_NOMINAL or vsState == PTCS_DEGRADED or vsState == PTCS_OVERLOADED) -> vsState := PTCS_FAILED;
+		evDegradation: vsMode == PTCM_OPERATION and (vsState == PTCS_NOMINAL or vsState == PTCS_OVERLOADED) -> vsState := PTCS_DEGRADED;
+		evOverload: vsMode == PTCM_OPERATION and vsState == PTCS_NOMINAL and (vcFromSibling == PTCS_DEGRADED or vcFromSibling == PTCS_FAILED) -> vsState := PTCS_OVERLOADED;
+
+	// External behavior
+	assertion
+		vcToOther := vsState;
+end
+
+class ExtractionComponent
+	extends PeriodicallyTestedComponent;
+	// External behavior
+	Boolean vfInput, vfOutput (reset = false);
+	assertion
+		vfOutput := if vsMode == PTCM_TEST or vsState == PTCS_FAILED or vsState == PTCS_STOPPED then false else vfInput;
+end
+
+
+domain CRCState {CRCS_STANDBY, CRCS_WORKING, CRCS_FAILED, CRCS_HIDDEN_FAILED}
+domain SeparationControlMode {CRCCM_OPERATION, CRCCM_MAINTENANCE}
+
+class ColdRedundantComponent
+	// Internal behavior
+	CRCState vsState (init = CRCS_WORKING); // CRCS_STANDBY | CRCS_WORKING | CRCS_FAILED | CRCS_HIDDEN_FAILED
+	Boolean vfIsDemanded (reset = false);
+	parameter Real pFailure = 1.0e-5;
+	parameter Real pFailureOnDemand = 1.0e-5;
+	parameter Real pDormantFailure = 1.0e-6;
+	event evFailure (delay = exponential(pFailure));
+	event evStart (delay = Dirac(0.0) , expectation = 1 - pFailureOnDemand);
+	event evFailureOnDemand (delay = Dirac(0.0) , expectation = pFailureOnDemand);
+	event evDormantFailure (delay = exponential(pDormantFailure));
+	transition
+		evFailure: vsState == CRCS_WORKING -> vsState := CRCS_FAILED;
+		evStart: vsState == CRCS_STANDBY and vfIsDemanded -> vsState := CRCS_WORKING;
+		evFailureOnDemand: (vsState == CRCS_STANDBY or vsState == CRCS_HIDDEN_FAILED) and vfIsDemanded -> vsState := CRCS_FAILED;
+		evDormantFailure: vsState == CRCS_STANDBY -> vsState := CRCS_HIDDEN_FAILED;
+
+	// External behavior
+	Boolean vfIsFailed (reset = false);
+	assertion
+		vfIsFailed := vsState == CRCS_FAILED;
+end
+
+class SeparationComponent
+	extends ColdRedundantComponent;
+	// External behavior
+	Boolean vfInput, vfOutput (reset = false);
+	assertion
+		vfOutput :=	vsState == CRCS_WORKING and vfInput;
+end
+
+
+domain RCState {RCS_WORKING, RCS_FAILED, RCS_MAINTENANCE}
+domain PackagingControlMode {RCCM_OPERATION, RCCM_MAINTENANCE_C1, RCCM_MAINTENANCE_C2}
+
+class RepairableComponent
+	RCState vsState (init = RCS_WORKING); // RCS_WORKING | RCS_FAILED | RCS_MAINTENANCE
+	parameter Real pFailure = 1.0e-5;
+	event evFailure (delay = exponential(pFailure));
+//	event evStartMaintenance (hidden = true); // this event must be synchronized with another one in a controller
+//	event evFinishMaintenance (hidden = true); // this event must be synchronized with another one in a controller
+	transition
+		evFailure: vsState == RCS_WORKING -> vsState := RCS_FAILED;
+//		evStartMaintenance: true -> vsState := RCS_MAINTENANCE;
+//		evFinishMaintenance: vsState == RCS_MAINTENANCE -> vsState := RCS_WORKING;
+
+	// External behavior
+	Boolean vfIsFailed (reset = false);
+	assertion
+		vfIsFailed := vsState == RCS_FAILED;
+end
+
+class PackagingComponent
+	extends RepairableComponent;
+	// External behavior
+	Boolean vfInput, vfOutput (reset = false);
+	assertion
+		vfOutput :=	vsState == RCS_WORKING and vfInput;
+end
+
+
+block System
+
+	block Supervisor
+
+		block Extraction
+
+			embeds main.Plant.Extraction.EC1 as EC1;
+			embeds main.Plant.Extraction.EC2 as EC2;
+
+			// Interactions between components
+			assertion
+				EC1.vcFromSibling := EC2.vcToOther;
+				EC2.vcFromSibling := EC1.vcToOther;
+
+			// State variables for tests and maintenances
+			parameter Boolean pBool = true;
+			ExtractionControlMode vsMode (init = PTCCM_OPERATION); // PTCCM_OPERATION | PTCCM_TEST | PTCCM_MAINTENANCE
+			PTCState vsComponentState (init = PTCS_NOMINAL); // PTCS_OVERLOADED | PTCS_NOMINAL | PTCS_DEGRADED | PTCS_FAILED | PTCS_STOPPED
+
+			// Periodic tests
+			parameter Real pTestInterval = 6570.0; // 9 months
+			parameter Real pTestDuration = 6.0;
+			event evStartTest (delay = Dirac(pTestInterval));
+			event evCompleteTest (delay = Dirac(pTestDuration));
+			transition
+				evStartTest: vsMode == PTCCM_OPERATION
+						->	{
+								vsMode := PTCCM_TEST;
+								EC1.vsMode := PTCM_TEST;
+								EC2.vsMode := PTCM_TEST;
+							}
+				evCompleteTest: vsMode == PTCCM_TEST
+								-> {
+										vsMode := PTCCM_OPERATION;
+										vsComponentState := switch
+										{
+											case EC1.vsState == PTCS_DEGRADED or EC2.vsState == PTCS_DEGRADED: PTCS_DEGRADED
+											case EC1.vsState == PTCS_FAILED or EC2.vsState == PTCS_FAILED: PTCS_FAILED
+											default: PTCS_NOMINAL
+										};
+										EC1.vsMode := PTCM_OPERATION;
+										EC2.vsMode := PTCM_OPERATION;
+									}
+
+			// Maintenance part
+			parameter Real pStartMaintenanceMin = 24.0; // 1 day
+			parameter Real pStartMaintenanceMax = 48.0; // 2 days
+			parameter Real pFinishMaintenanceMin = 12.0;
+			parameter Real pFinishMaintenanceMax = 24.0;
+			event evStartMaintenance (delay = uniform(pStartMaintenanceMin , pStartMaintenanceMax));
+			event evFinishMaintenance (delay = uniform(pFinishMaintenanceMin , pFinishMaintenanceMax));
+			transition
+				evStartMaintenance: vsMode == PTCCM_OPERATION and (vsComponentState == PTCS_DEGRADED or vsComponentState == PTCS_FAILED)
+									->	{
+											vsMode := PTCCM_MAINTENANCE;
+											EC1.vsState := PTCS_STOPPED;
+											EC2.vsState := PTCS_STOPPED;
+										}
+				evFinishMaintenance: vsMode == PTCCM_MAINTENANCE
+									->	{
+											vsMode := PTCCM_OPERATION;
+											EC1.vsState := PTCS_NOMINAL;
+											EC2.vsState := PTCS_NOMINAL;
+											vsComponentState := PTCS_NOMINAL;
+										}
+
+		end // Extraction
+
+		block Separation
+
+			embeds main.Plant.Separation.SC1 as SC1;
+			embeds main.Plant.Separation.SC2 as SC2;
+			embeds main.Plant.Separation.SC3 as SC3;
+
+			// Control law to model interactions between components of the Separation part
+			assertion
+				SC1.vfIsDemanded := if SC2.vfIsFailed or SC3.vfIsFailed then true else false;
+				SC2.vfIsDemanded := if SC1.vfIsFailed or SC3.vfIsFailed then true else false;
+				SC3.vfIsDemanded := if SC1.vfIsFailed or SC2.vfIsFailed then true else false;
+
+			// Maintenance part
+			parameter Real pStartMaintenanceMu = 2.0;
+			parameter Real pStartMaintenanceNu = 3.0;
+			parameter Real pFinishMaintenanceMu = 6.0;
+			parameter Real pFinishMaintenanceNu = 12.0;
+			SeparationControlMode vsMode (init = CRCCM_OPERATION); // CRCCM_OPERATION | CRCCM_MAINTENANCE
+			Boolean vfAreFailed (reset = false);
+			event evStartMaintenance (delay = uniform(pStartMaintenanceMu , pStartMaintenanceNu));
+			event evFinishMaintenance (delay = uniform(pFinishMaintenanceMu , pFinishMaintenanceNu));
+			transition
+				evStartMaintenance: vfAreFailed and vsMode == CRCCM_OPERATION
+									->	{
+											vsMode := CRCCM_MAINTENANCE;
+											if SC1.vsState == CRCS_FAILED then SC1.vsState := CRCS_STANDBY;
+											if SC2.vsState == CRCS_FAILED then SC2.vsState := CRCS_STANDBY;
+											if SC3.vsState == CRCS_FAILED then SC3.vsState := CRCS_STANDBY;
+										}
+				evFinishMaintenance: vsMode == CRCCM_MAINTENANCE
+									->	{
+											vsMode := CRCCM_OPERATION;
+											switch
+											{
+												case SC1.vsState == CRCS_WORKING and SC2.vsState == CRCS_STANDBY and SC3.vsState == CRCS_STANDBY: SC2.vsState := CRCS_WORKING;
+												case SC1.vsState == CRCS_STANDBY and SC2.vsState == CRCS_WORKING and SC3.vsState == CRCS_STANDBY: SC1.vsState := CRCS_WORKING;
+												case SC1.vsState == CRCS_STANDBY and SC2.vsState == CRCS_STANDBY and SC3.vsState == CRCS_WORKING: SC1.vsState := CRCS_WORKING;
+												case SC1.vsState == CRCS_STANDBY and SC2.vsState == CRCS_STANDBY and SC3.vsState == CRCS_STANDBY:
+												{
+													SC1.vsState := CRCS_WORKING;
+													SC2.vsState := CRCS_WORKING;
+												}
+												default: skip;
+											}
+										}
+
+			assertion
+				vfAreFailed := SC1.vfIsFailed or SC2.vfIsFailed or SC3.vfIsFailed;
+
+		end // Separation
+
+		block Packaging
+
+			embeds main.Plant.Packaging.PC1 as PC1;
+			embeds main.Plant.Packaging.PC2 as PC2;
+
+			// Maintenance part
+			PackagingControlMode vsMode (init = RCCM_OPERATION); // RCCM_OPERATION | RCCM_MAINTENANCE_C1 | RCCM_MAINTENANCE_C2
+			PackagingControlMode vsNextMaintenance (init = RCCM_MAINTENANCE_C1); // RCCM_OPERATION | RCCM_MAINTENANCE_C1 | RCCM_MAINTENANCE_C2
+
+			parameter Real pStartMaintenance = 8760.0; // 12 months
+			parameter Real pFinishMaintenanceMin = 6.0;
+			parameter Real pFinishMaintenanceMax = 12.0;
+			parameter Real pRequiredMaintenanceMin = 24.0; // 1 day
+			parameter Real pRequiredMaintenanceMax = 48.0; // 2 days
+			event evStartMaintenanceC1 (delay = Dirac(pStartMaintenance));
+			event evStartMaintenanceC2 (delay = Dirac(pStartMaintenance));
+			event evFinishMaintenance (delay = uniform(pFinishMaintenanceMin , pFinishMaintenanceMax));
+			event evStartRequiredMaintenance (delay = uniform(pRequiredMaintenanceMin , pRequiredMaintenanceMax));
+			transition
+				evStartMaintenanceC1: vsMode == RCCM_OPERATION and vsNextMaintenance == RCCM_MAINTENANCE_C1
+									 ->	{
+											vsMode := RCCM_MAINTENANCE_C1;
+											PC1.vsState := RCS_MAINTENANCE;
+											vsNextMaintenance := RCCM_MAINTENANCE_C2;
+										}
+				evStartMaintenanceC2: vsMode == RCCM_OPERATION and vsNextMaintenance == RCCM_MAINTENANCE_C2
+									 ->	{
+											vsMode := RCCM_MAINTENANCE_C2;
+											PC2.vsState := RCS_MAINTENANCE;
+											vsNextMaintenance := RCCM_MAINTENANCE_C1;
+										}
+				evFinishMaintenance: vsMode == RCCM_MAINTENANCE_C1 or vsMode == RCCM_MAINTENANCE_C2
+									 ->	{
+											vsMode := RCCM_OPERATION;
+											if PC1.vsState == RCS_MAINTENANCE then PC1.vsState := RCS_WORKING;
+											if PC2.vsState == RCS_MAINTENANCE then PC2.vsState := RCS_WORKING;
+										}
+				evStartRequiredMaintenance: (PC1.vfIsFailed or PC2.vfIsFailed) and vsMode == RCCM_OPERATION
+									->	switch
+										{
+											case PC1.vfIsFailed: {vsMode := RCCM_MAINTENANCE_C1; PC1.vsState := RCS_MAINTENANCE; vsNextMaintenance := RCCM_MAINTENANCE_C2;}
+											case PC2.vfIsFailed: {vsMode := RCCM_MAINTENANCE_C2; PC2.vsState := RCS_MAINTENANCE; vsNextMaintenance := RCCM_MAINTENANCE_C1;}
+											default: skip;
+										}
+
+		end // Packaging
+
+	end // Supervisor
+
+	block Plant
+
+		block Source
+			parameter Boolean pASourceQuantity = true;
+			Boolean vfOutput (reset = false);
+			assertion
+				vfOutput := pASourceQuantity;
+		end // Source
+
+		block Extraction
+			parameter Boolean pBExtraction = false;
+
+			// Components of this PTCPart
+			ExtractionComponent EC1;
+			ExtractionComponent EC2;
+
+			// The production of this PTCPart
+			Boolean vfInput, vfOutput (reset = false);
+			assertion
+				EC1.vfInput := vfInput;
+				EC2.vfInput := vfInput;
+				vfOutput := if vfInput then EC1.vfOutput or EC2.vfOutput else false;
+
+		end // Extraction
+
+		block Separation
+			parameter Boolean pCSeparation = false;
+
+			// The components of this Separation
+			SeparationComponent SC1;
+			SeparationComponent SC2;
+			SeparationComponent SC3 (vsState.init = CRCS_STANDBY);
+
+			// The production of this Separation
+			Boolean vfInput, vfOutput (reset = false);
+			assertion
+				SC1.vfInput := vfInput;
+				SC2.vfInput := vfInput;
+				SC3.vfInput := vfInput;
+//				vfOutput := #(SC1.vfOutput , SC2.vfOutput , SC3.vfOutput) >= 2;
+				vfOutput := if SC1.vfOutput == true and SC2.vfOutput == true and SC3.vfOutput == true then true
+							else if (SC1.vfOutput == true and SC2.vfOutput == true and SC3.vfOutput == false)
+									or (SC1.vfOutput == true and SC2.vfOutput == false and SC3.vfOutput == true)
+									or (SC1.vfOutput == false and SC2.vfOutput == true and SC3.vfOutput == true)
+								then true else false;
+
+		end // Separation
+
+		block Packaging
+			parameter Boolean pDPackaging = false;
+
+			// The components of this Packaging
+			PackagingComponent PC1;
+			PackagingComponent PC2;
+			// The production of this Packaging
+			Boolean vfInput, vfOutput (reset = false);
+			assertion
+				PC1.vfInput := vfInput;
+				PC2.vfInput := vfInput;
+				vfOutput := PC1.vfOutput or PC2.vfOutput;
+
+		end // Packaging
+
+		block Target
+			parameter Boolean pETarget = false;
+			Boolean vfInput (reset = false);
+		end // Target
+
+		assertion
+			Extraction.vfInput := Source.vfOutput;
+			Separation.vfInput := Extraction.vfOutput;
+			Packaging.vfInput := Separation.vfOutput;
+			Target.vfInput := Packaging.vfOutput;
+
+	end // Plant
+
+	observer Boolean oSystemProduction = Plant.Target.vfInput;
+	observer Boolean oExtractionProduction = Plant.Extraction.vfOutput;
+	observer Boolean oSeparationProduction = Plant.Separation.vfOutput;
+	observer Boolean oPackagingProduction = Plant.Packaging.vfOutput;
+
+	observer Boolean oExtractionMaintenance = Supervisor.Extraction.vsMode == PTCCM_MAINTENANCE;
+	observer Boolean oSeparationMaintenance = Supervisor.Separation.vsMode == CRCCM_MAINTENANCE;
+	observer Boolean oPackagingMaintenance = Supervisor.Packaging.vsMode == RCCM_MAINTENANCE_C1 or Supervisor.Packaging.vsMode == RCCM_MAINTENANCE_C2; 
+
+end

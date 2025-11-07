@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="Counter">
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+    <file path="counter.alt" name="counter.alt"/>
+</project>

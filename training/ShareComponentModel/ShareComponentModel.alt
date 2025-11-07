@@ -1,0 +1,41 @@
+
+class NonRepairableComponent
+ 	Boolean working (init = true);
+	event failure;
+ 	transition
+		failure : working -> working :=false;
+end
+
+class FlowComponent extends NonRepairableComponent;
+	Boolean  inflow (reset = false);
+	Boolean outflow (reset = false);
+	assertion
+		outflow := inflow and working;
+end
+class SourceComponent extends NonRepairableComponent;
+	Boolean outflow (reset = false);
+	assertion
+		outflow := working;
+end
+
+block System
+	SourceComponent ElectricSource;
+	Boolean outflow (reset = false);
+
+	block MainTrain
+		embeds main.ElectricSource as ES;
+		FlowComponent Main;
+
+		assertion
+			Main.inflow :=: ES.outflow;
+	end
+
+	block SpareTrain
+		embeds main.ElectricSource as ES;
+		FlowComponent Spare;
+		assertion
+			Spare.inflow :=: ES.outflow;
+	end
+	assertion
+		outflow := MainTrain.Main.outflow or SpareTrain.Spare.outflow;
+end

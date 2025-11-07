@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="PetriNets">
+    <file path="PetriNets.alt" name="PetriNets.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

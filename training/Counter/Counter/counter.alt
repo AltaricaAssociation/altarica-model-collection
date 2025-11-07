@@ -1,0 +1,7 @@
+block Counter
+  Integer count (init = 0);
+  event inc, dec;
+  transition
+     inc: true -> count:= count+1;
+     dec: count>0 -> count:= count-1;
+end

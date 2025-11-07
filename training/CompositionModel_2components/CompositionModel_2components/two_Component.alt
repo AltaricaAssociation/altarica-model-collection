@@ -1,0 +1,11 @@
+class component
+  Boolean working (init = true);
+  event failure, repair;
+  transition
+      failure: working -> working := false;
+      repair: not working -> working := true;
+ end
+
+block twoEngines
+  component A, B;
+end

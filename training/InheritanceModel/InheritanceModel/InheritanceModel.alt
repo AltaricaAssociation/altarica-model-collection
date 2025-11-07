@@ -1,0 +1,14 @@
+class NonRepairableComponent
+ 	Boolean working (init = true);
+	event failure;
+ 	transition
+		failure : working -> working :=false;
+end
+
+class Pump 
+	extends NonRepairableComponent;
+	Boolean  inflow (reset = false);
+	Boolean outflow (reset = false);
+	assertion
+		outflow := inflow and working;
+end

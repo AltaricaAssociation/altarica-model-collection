@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="SpareComponent">
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+    <file path="spareComponent.alt" name="spareComponent.alt"/>
+</project>

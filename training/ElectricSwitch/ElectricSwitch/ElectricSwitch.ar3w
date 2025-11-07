@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="ElectricSwitch">
+    <file path="ElectricSwitch.alt" name="ElectricSwitch.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

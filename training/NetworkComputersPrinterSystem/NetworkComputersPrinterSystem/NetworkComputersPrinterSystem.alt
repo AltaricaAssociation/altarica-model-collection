@@ -1,0 +1,37 @@
+domain computerState{WORKING, WAITING, PRINTING}
+
+class Computer
+	computerState vState (init = WORKING);
+	event action, askPrinter, getPrinter, releasePrinter;
+	transition
+		action: vState==WORKING-> skip;
+		askPrinter: vState==WORKING -> vState:= WAITING;
+		getPrinter: vState==WAITING -> vState:= PRINTING;
+		releasePrinter: vState== PRINTING -> vState:= WORKING;
+end
+
+domain printerState { STANDBY, WORKING }
+
+class Printer
+	printerState vState (init = STANDBY);
+	event startJob, endJob;
+	transition
+		startJob: vState==STANDBY -> vState := WORKING ;
+		endJob: vState== WORKING -> vState := STANDBY;
+end
+
+block Network
+	Computer A, B;
+	Printer P;
+	event startPrinting, endPrinting;
+	transition
+		startPrinting:
+			!A.getPrinter & !P.startJob
+			| !B.getPrinter & !P.startJob;
+		endPrinting:
+			 ! A.releasePrinter & !P.endJob
+			| !B. releasePrinter & !P.endJob;
+	hide A.getPrinter, A.releasePrinter;
+	hide B.getPrinter, B.releasePrinter;
+	hide P.startJob, P.endJob;
+end

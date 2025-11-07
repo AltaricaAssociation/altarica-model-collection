@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="ShareComponentModel">
+    <file path="ShareComponentModel.alt" name="ShareComponentModel.alt"/>
+    <file path="System.gts" name="System.gts"/>
+</project>

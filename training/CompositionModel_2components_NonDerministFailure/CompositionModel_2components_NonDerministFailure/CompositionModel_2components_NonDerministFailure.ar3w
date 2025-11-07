@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="CompositionModel_2components_NonDerministFailure">
+    <file path="CompositionModel_2components_NonDerministFailure.alt" name="CompositionModel_2components_NonDerministFailure.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

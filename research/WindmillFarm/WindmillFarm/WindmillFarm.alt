@@ -1,0 +1,548 @@
+/*
+ * =============================================================================
+ *  COPYRIGHT (c) 2014-2025 - AltaRica Association
+ * =============================================================================
+ *
+ *  Project: "MaintenanceCombination"
+ *
+ * =============================================================================
+ *  All rights reserved.
+ *  Unauthorized copying of this file, via any medium, is strictly prohibited.
+ *  The content of this file is proprietary and confidential.
+ * =============================================================================
+ */
+
+/*
+ * Mission time: 43800 hours (5 years)
+ * with observations every 6 months: (from 0 to 43800 with step 4380)
+ * 									 (4380; 8760; 13140; 17520; 21900; 26280; 30660; 35040; 39420)
+ */
+
+
+
+domain UnitState {WORKING, FAILED, HIDDEN_FAILED, STANDBY}
+domain WindForce {NULL, LOW, NORMAL, HIGH, STORM}
+domain WindTurbineProduction {NULL, LOW, NORMAL, HIGH}
+
+domain YearDomain {SPRING, SUMMER, WINTER, AUTUMN}
+domain DayDomain {MORNING, DAY, EVENING, NIGHT}
+
+
+domain LineMode {OPERATIONAL, MAINTENANCE}
+
+operator Real WindTurbineProduction(WindForce aWindForceIn, Real aLowProduction, Real aNormalProduction, Real aHighProduction)
+	if (aWindForceIn == NULL or aWindForceIn == STORM) then 0.0 
+	else if aWindForceIn == LOW then aLowProduction 
+	else if aWindForceIn == NORMAL then aNormalProduction 
+	else aHighProduction
+end
+
+class UnitB
+	UnitState vsState (init = WORKING);
+	Boolean vfStartDemanded (reset = false);
+	Boolean vfStopDemanded (reset = false);
+
+	parameter Real pFailure = 1.0e-5;
+	parameter Real pDormantFailure = 1.0e-6;
+
+	event evFailure (delay = exponential(pFailure));
+	event evDormantFailure (delay = exponential(pDormantFailure));
+	event evStart (delay = Dirac(0.0));
+	event evStop (delay = Dirac(0.0));
+
+	transition
+		evFailure: vsState == WORKING -> vsState := FAILED;
+		evDormantFailure: vsState == STANDBY -> vsState := HIDDEN_FAILED;
+		evStart: vsState == STANDBY and vfStartDemanded -> vsState := WORKING;
+		evStart: vsState == HIDDEN_FAILED and vfStartDemanded -> vsState := FAILED;
+		evStop: vsState == WORKING and vfStopDemanded -> vsState := STANDBY;
+end
+
+class UnitA
+	UnitState vsState (init = WORKING);
+	
+	parameter Real pFailure = 1.0e-5;
+
+	event evFailure (delay = exponential(pFailure));
+
+	transition
+		evFailure: vsState == WORKING -> vsState := FAILED;
+
+	Real vfProductionIn, vfProductionOut (reset = 0.0);
+	Boolean vfWorking (reset = false);
+	
+	assertion
+		vfProductionOut := if vsState==WORKING then vfProductionIn else 0.0; 
+		vfWorking := (vsState == WORKING);
+end
+
+class Cable
+	extends UnitA;
+end
+
+class WindTurbine
+	extends UnitB;
+
+	parameter Real pLowProduction = 40.0;
+	parameter Real pNormalProduction = 70.0;
+	parameter Real pHighProduction = 100.0;
+
+	Real vfProductionOut(reset = 0.0);
+	WindForce vfWindForceIn (reset = NULL);
+
+	assertion
+		vfProductionOut := if vsState == WORKING then (if (vfWindForceIn == NULL or vfWindForceIn == STORM) then 0.0 
+												 else if vfWindForceIn == LOW then pLowProduction 
+												 else if vfWindForceIn == NORMAL then pNormalProduction 
+												 else pHighProduction) else 0.0;
+
+end
+
+class Line
+	
+// System composition
+	WindTurbine WM1, WM2, WM3, WM4, WM5 (vsState.init = STANDBY);
+	Cable C1, C2, C3, C4, C5;
+
+// Flow input variables
+	WindForce vfWindForceIn (reset = NULL);
+	Boolean vfStartDemanded (reset = false);
+ 	Boolean vfStopDemanded (reset = false);
+
+// Flow output variables
+	Real vfProductionOut (reset = 0.0);
+	Boolean vfIsFailed (reset = true);
+
+
+// Flow output variables
+	Integer vfNumberOfWorkingWM (reset = 0);
+	Integer vfNumberOfFailedWM (reset = 0);
+	Integer vfNumberOfStoppedWM (reset = 0);
+
+	block Controller
+
+		LineMode vsMode (init = OPERATIONAL);	
+		event evStartMaintenance, evFinishMaintenance (hidden = true);
+
+		transition
+			evStartMaintenance: owner.vfIsFailed and not vsMode == MAINTENANCE
+							-> vsMode := MAINTENANCE;
+			evFinishMaintenance:
+							 vsMode == MAINTENANCE -> 
+										{
+											if owner.WM1.vsState == FAILED then owner.WM1.vsState := STANDBY;
+											if owner.WM2.vsState == FAILED then owner.WM2.vsState := STANDBY;
+											if owner.WM3.vsState == FAILED then owner.WM3.vsState := STANDBY;
+											if owner.WM4.vsState == FAILED then owner.WM4.vsState := STANDBY;
+											if owner.WM5.vsState == FAILED then owner.WM5.vsState := STANDBY;
+											if owner.C1.vsState == FAILED then owner.C1.vsState := WORKING;
+											if owner.C2.vsState == FAILED then owner.C2.vsState := WORKING;
+											if owner.C3.vsState == FAILED then owner.C3.vsState := WORKING;
+											if owner.C4.vsState == FAILED then owner.C4.vsState := WORKING;
+											if owner.C5.vsState == FAILED then owner.C5.vsState := WORKING;
+											vsMode := OPERATIONAL;
+										}
+
+	end
+
+	
+
+	assertion
+		WM1.vfStartDemanded := vfStartDemanded;
+		WM2.vfStartDemanded := vfStartDemanded and not (WM1.vsState == STANDBY); 
+		WM3.vfStartDemanded := vfStartDemanded and not (WM1.vsState == STANDBY) and not (WM2.vsState == STANDBY); 
+		WM4.vfStartDemanded := vfStartDemanded and not (WM1.vsState == STANDBY) and not (WM2.vsState == STANDBY) and not (WM3.vsState == STANDBY); 
+		WM5.vfStartDemanded := vfStartDemanded and not (WM1.vsState == STANDBY) and not (WM2.vsState == STANDBY) and not (WM3.vsState == STANDBY) and not (WM4.vsState == STANDBY); 
+
+		WM1.vfStopDemanded := vfStopDemanded and not (WM5.vsState == WORKING) and not (WM4.vsState == WORKING) and not (WM3.vsState == WORKING) and not (WM2.vsState == WORKING);
+		WM2.vfStopDemanded := vfStopDemanded and not (WM5.vsState == WORKING) and not (WM4.vsState == WORKING) and not (WM3.vsState == WORKING);
+		WM3.vfStopDemanded := vfStopDemanded and not (WM5.vsState == WORKING) and not (WM4.vsState == WORKING);
+		WM4.vfStopDemanded := vfStopDemanded and not (WM5.vsState == WORKING);
+		WM5.vfStopDemanded := vfStopDemanded;
+
+
+		vfNumberOfWorkingWM := #(WM1.vsState == WORKING, WM2.vsState == WORKING, WM3.vsState == WORKING, WM4.vsState == WORKING, WM5.vsState == WORKING );
+		vfNumberOfFailedWM := #(WM1.vsState == FAILED or WM1.vsState == HIDDEN_FAILED, WM2.vsState == FAILED or WM2.vsState == HIDDEN_FAILED, WM3.vsState == FAILED or WM3.vsState == HIDDEN_FAILED, WM4.vsState == FAILED or WM4.vsState == HIDDEN_FAILED, WM5.vsState == FAILED or WM5.vsState == HIDDEN_FAILED );
+		vfNumberOfStoppedWM := #(WM1.vsState == STANDBY, WM2.vsState == STANDBY, WM3.vsState == STANDBY, WM4.vsState == STANDBY, WM5.vsState == STANDBY );
+
+		vfIsFailed := (WM1.vsState == FAILED or WM2.vsState == FAILED or WM3.vsState == FAILED or WM4.vsState == FAILED or WM5.vsState == FAILED
+							or C1.vsState == FAILED or C2.vsState == FAILED or C3.vsState == FAILED or C4.vsState == FAILED or C5.vsState == FAILED) ;
+
+		WM1.vfWindForceIn := vfWindForceIn;
+		WM2.vfWindForceIn := vfWindForceIn;
+		WM3.vfWindForceIn := vfWindForceIn;
+		WM4.vfWindForceIn := vfWindForceIn;
+		WM5.vfWindForceIn := vfWindForceIn;
+
+		C1.vfProductionIn := WM1.vfProductionOut;
+		C2.vfProductionIn := WM2.vfProductionOut;
+		C3.vfProductionIn := WM3.vfProductionOut;
+		C4.vfProductionIn := WM4.vfProductionOut;
+		C5.vfProductionIn := WM5.vfProductionOut;
+
+		vfProductionOut := if not C1.vfWorking then 0.0
+							   else if not C2.vfWorking then C1.vfProductionOut 
+							   else if not C3.vfWorking then C2.vfProductionOut + C1.vfProductionOut
+							   else if not C4.vfWorking then C3.vfProductionOut + C2.vfProductionOut + C1.vfProductionOut
+							   else if not C5.vfWorking then C4.vfProductionOut + C3.vfProductionOut + C2.vfProductionOut + C1.vfProductionOut
+							   else C5.vfProductionOut + C4.vfProductionOut + C3.vfProductionOut + C2.vfProductionOut + C1.vfProductionOut;
+		
+end
+
+
+
+
+block WindmillFarmSystem
+
+	block Wind
+		WindForce vsWindForce (init = HIGH);
+		WindForce vfWindForceOut (reset = NULL);
+
+		Boolean vsWaiting (init = false);
+		event evWaitingChange (delay = Dirac(0.1));
+		transition
+			evWaitingChange: vsWaiting -> vsWaiting := false;
+		
+		parameter Real pWindChangePeriod = 4.0; // hours
+		
+		event evStayNull(delay = Dirac(pWindChangePeriod), expectation = 1.0/2.0);
+		event evStayStorm (delay = Dirac(pWindChangePeriod), expectation = 1.0/2.0);
+		event evIncreaseLow (delay = Dirac(pWindChangePeriod), expectation = 1.0/2.0);
+		event evDecreaseHigh (delay = Dirac(pWindChangePeriod), expectation = 1.0/2.0);
+		event evStay (delay = Dirac(pWindChangePeriod), expectation = 1.0/3.0);
+		event evIncrease (delay = Dirac(pWindChangePeriod), expectation = 1.0/3.0);
+		event evDecrease (delay = Dirac(pWindChangePeriod), expectation = 1.0/3.0);
+
+		transition
+
+			evStayNull: not vsWaiting and vsWindForce == NULL -> {vsWindForce := NULL; vsWaiting := true;}
+			evIncreaseLow: not vsWaiting and vsWindForce == NULL -> {vsWindForce := LOW; vsWaiting := true;}
+
+			evStay: not vsWaiting and vsWindForce == LOW -> {vsWindForce := LOW; vsWaiting := true;}
+			evIncrease: not vsWaiting and vsWindForce == LOW -> {vsWindForce := NORMAL; vsWaiting := true;}
+			evDecrease: not vsWaiting and vsWindForce == LOW -> {vsWindForce := NULL; vsWaiting := true;}
+
+			evStay: not vsWaiting and vsWindForce == NORMAL -> {vsWindForce := NORMAL; vsWaiting := true;}
+			evIncrease: not vsWaiting and vsWindForce == NORMAL -> {vsWindForce := HIGH; vsWaiting := true;}
+			evDecrease: not vsWaiting and vsWindForce == NORMAL -> {vsWindForce := LOW; vsWaiting := true;}
+
+			evStay: not vsWaiting and vsWindForce == HIGH -> {vsWindForce := HIGH; vsWaiting := true;}
+			evIncrease: not vsWaiting and vsWindForce == HIGH -> {vsWindForce := STORM; vsWaiting := true;}
+			evDecrease: not vsWaiting and vsWindForce == HIGH -> {vsWindForce := NORMAL; vsWaiting := true;}
+
+			evStayStorm: not vsWaiting and vsWindForce == STORM -> {vsWindForce := STORM; vsWaiting := true;}
+			evDecreaseHigh: not vsWaiting and vsWindForce == STORM -> {vsWindForce := HIGH; vsWaiting := true;}
+
+		assertion
+			vfWindForceOut := vsWindForce;
+	end // Wind
+
+	block PowerProductionSystem
+
+		WindForce vfWindForceIn (reset = NULL);
+		Real vfProductionNeedIn (reset = 0.0);
+
+		Line Line1, Line2, Line3, Line4, Line5;
+
+		block ElectricalSystem
+			Cable MC1, MC2, MC3, MC4, MC5;
+
+			block ESS
+				extends UnitA;
+			end
+			
+			// Maintenance of ElectricalSystem
+			Boolean vfIsFailed (reset = false);
+			LineMode vsMode (init = OPERATIONAL);	
+			event evStartMaintenance, evFinishMaintenance (hidden = true);
+			transition
+				evStartMaintenance: vfIsFailed and not vsMode == MAINTENANCE
+						-> vsMode := MAINTENANCE;
+				evFinishMaintenance: vsMode == MAINTENANCE
+					-> {
+							if ESS.vsState == FAILED then ESS.vsState := WORKING;
+							if MC1.vsState == FAILED then MC1.vsState := WORKING;
+							if MC2.vsState == FAILED then MC2.vsState := WORKING;
+							if MC3.vsState == FAILED then MC3.vsState := WORKING;
+							if MC4.vsState == FAILED then MC4.vsState := WORKING;
+							if MC5.vsState == FAILED then MC5.vsState := WORKING;
+							vsMode := OPERATIONAL;
+						}
+			assertion
+				vfIsFailed := not ESS.vfWorking or not MC1.vfWorking or not MC2.vfWorking or not MC3.vfWorking or not MC4.vfWorking or not MC5.vfWorking;
+
+			// Connection between components
+			Real vfProductionIn, vfProductionOut (reset = 0.0);
+			assertion
+				ESS.vfProductionIn := vfProductionIn;
+				MC1.vfProductionIn := ESS.vfProductionOut;
+				MC2.vfProductionIn := MC1.vfProductionOut;
+				MC3.vfProductionIn := MC2.vfProductionOut;
+				MC4.vfProductionIn := MC3.vfProductionOut;
+				MC5.vfProductionIn := MC4.vfProductionOut;
+				vfProductionOut := MC5.vfProductionOut;
+				
+		end // ElectricalSystem
+		
+		block Supervision
+
+			block Controller
+				Boolean vfStartDemanded (reset = false);
+				Boolean vfStopDemanded (reset = false);
+				assertion
+					vfStartDemanded := (owner.owner.vfProductionNeedIn - owner.owner.vfProductionOut > 0.0) and not ((owner.owner.vfWindForceIn == NULL) or (owner.owner.vfWindForceIn == STORM));
+					vfStopDemanded := (owner.owner.vfProductionNeedIn - owner.owner.vfProductionOut < - owner.owner.vfProductionOfWM)
+									  or (owner.owner.vfWindForceIn == NULL) or (owner.owner.vfWindForceIn == STORM);
+
+					owner.owner.Line1.vfStartDemanded := vfStartDemanded;
+					owner.owner.Line2.vfStartDemanded := vfStartDemanded and (owner.owner.Line1.vfNumberOfStoppedWM == 0);
+					owner.owner.Line3.vfStartDemanded := vfStartDemanded and (owner.owner.Line1.vfNumberOfStoppedWM == 0) and (owner.owner.Line2.vfNumberOfStoppedWM == 0);
+					owner.owner.Line4.vfStartDemanded := vfStartDemanded and (owner.owner.Line1.vfNumberOfStoppedWM == 0) and (owner.owner.Line2.vfNumberOfStoppedWM == 0)
+                                    and (owner.owner.Line3.vfNumberOfStoppedWM == 0);
+					owner.owner.Line5.vfStartDemanded := vfStartDemanded and (owner.owner.Line1.vfNumberOfStoppedWM == 0) and (owner.owner.Line2.vfNumberOfStoppedWM == 0)
+									and (owner.owner.Line3.vfNumberOfStoppedWM == 0) and (owner.owner.Line4.vfNumberOfStoppedWM == 0);
+
+					owner.owner.Line1.vfStopDemanded := vfStopDemanded and (owner.owner.Line5.vfNumberOfWorkingWM == 0) and (owner.owner.Line4.vfNumberOfWorkingWM == 0)
+									and (owner.owner.Line3.vfNumberOfWorkingWM == 0) and (owner.owner.Line2.vfNumberOfWorkingWM == 0);
+					owner.owner.Line2.vfStopDemanded := vfStopDemanded and (owner.owner.Line5.vfNumberOfWorkingWM == 0) and (owner.owner.Line4.vfNumberOfWorkingWM == 0)
+									and (owner.owner.Line3.vfNumberOfWorkingWM == 0);
+					owner.owner.Line3.vfStopDemanded := vfStopDemanded and (owner.owner.Line5.vfNumberOfWorkingWM == 0) and (owner.owner.Line4.vfNumberOfWorkingWM == 0);
+					owner.owner.Line4.vfStopDemanded := vfStopDemanded and (owner.owner.Line5.vfNumberOfWorkingWM == 0);
+					owner.owner.Line5.vfStopDemanded := vfStopDemanded;
+			end // Controller
+			
+			block Maintenance
+
+				block Repairers
+					parameter Integer pMaintenanceCrewNumber = 2;
+					Integer vsMaintenanceCrewAvailable (init = pMaintenanceCrewNumber);
+					event evStartMaintenance, evFinishMaintenance (hidden = true);
+					transition
+						evStartMaintenance: vsMaintenanceCrewAvailable != 0 -> vsMaintenanceCrewAvailable := vsMaintenanceCrewAvailable - 1;
+						evFinishMaintenance: true -> vsMaintenanceCrewAvailable := vsMaintenanceCrewAvailable + 1;
+				end // Repairers
+
+				parameter Real pEndMaintenanceTimeMin = 24.0;
+				parameter Real pEndMaintenanceTimeMax = 72.0;
+				event evStartMaintenanceL1, evStartMaintenanceL2, evStartMaintenanceL3, evStartMaintenanceL4, evStartMaintenanceL5 (delay = Dirac(0.0));
+				event evFinishMaintenanceL1, evFinishMaintenanceL2, evFinishMaintenanceL3, evFinishMaintenanceL4, evFinishMaintenanceL5
+                                      (delay = uniform(pEndMaintenanceTimeMin, pEndMaintenanceTimeMax));
+				event evStartMaintenanceES (delay = Dirac(0.0));
+				event evFinishMaintenanceES (delay = uniform(pEndMaintenanceTimeMin, pEndMaintenanceTimeMax));
+				transition
+					evStartMaintenanceL1: !Repairers.evStartMaintenance & !owner.owner.Line1.Controller.evStartMaintenance;
+					evStartMaintenanceL2: !Repairers.evStartMaintenance & !owner.owner.Line2.Controller.evStartMaintenance;
+					evStartMaintenanceL3: !Repairers.evStartMaintenance & !owner.owner.Line3.Controller.evStartMaintenance;
+					evStartMaintenanceL4: !Repairers.evStartMaintenance & !owner.owner.Line4.Controller.evStartMaintenance;
+					evStartMaintenanceL5: !Repairers.evStartMaintenance & !owner.owner.Line5.Controller.evStartMaintenance;
+					evFinishMaintenanceL1: !Repairers.evFinishMaintenance & !owner.owner.Line1.Controller.evFinishMaintenance;
+					evFinishMaintenanceL2: !Repairers.evFinishMaintenance & !owner.owner.Line2.Controller.evFinishMaintenance;
+					evFinishMaintenanceL3: !Repairers.evFinishMaintenance & !owner.owner.Line3.Controller.evFinishMaintenance;
+					evFinishMaintenanceL4: !Repairers.evFinishMaintenance & !owner.owner.Line4.Controller.evFinishMaintenance;
+					evFinishMaintenanceL5: !Repairers.evFinishMaintenance & !owner.owner.Line5.Controller.evFinishMaintenance;
+					evStartMaintenanceES: !Repairers.evStartMaintenance & !owner.owner.ElectricalSystem.evStartMaintenance;
+					evFinishMaintenanceES: !Repairers.evFinishMaintenance & !owner.owner.ElectricalSystem.evFinishMaintenance;
+
+			end // Maintenance
+
+		end // Supervision
+
+		parameter Real pLowProduction = 40.0;
+		parameter Real pNormalProduction = 70.0;
+		parameter Real pHighProduction = 100.0;
+
+		Real vfProductionOut (reset = 0.0);
+		Real vfProductionOfWM (reset = 0.0);
+
+		assertion
+			vfProductionOfWM := WindTurbineProduction(vfWindForceIn, pLowProduction, pNormalProduction, pHighProduction)
+								- 0.01 * WindTurbineProduction(vfWindForceIn, pLowProduction, pNormalProduction, pHighProduction);
+			ElectricalSystem.vfProductionIn := Line1.vfProductionOut + Line2.vfProductionOut + Line3.vfProductionOut + Line4.vfProductionOut + Line5.vfProductionOut;
+			vfProductionOut := ElectricalSystem.vfProductionOut;
+			Line1.vfWindForceIn := vfWindForceIn;
+			Line2.vfWindForceIn := vfWindForceIn;
+			Line3.vfWindForceIn := vfWindForceIn;
+			Line4.vfWindForceIn := vfWindForceIn;
+			Line5.vfWindForceIn := vfWindForceIn;
+
+	end // PowerProductionSystem
+
+    block ProductionNeed
+
+		YearDomain vsSeason (init = SUMMER);
+		DayDomain vsTime (init = DAY);
+
+		Real vfProductionNeed(reset = pNullDemand);
+		
+		parameter Real pHighDemand = 2000.0;
+		parameter Real pNormalDemand = 1500.0;
+		parameter Real pLowDemand = 1000.0;
+		parameter Real pNullDemand = 0.0;
+
+		parameter Real pSpringPeriod = 2208.0;
+		parameter Real pSummerPeriod = 2208.0;
+		parameter Real pAutumnPeriod = 2184.0;
+		parameter Real pWinterPeriod = 2160.0;
+
+		parameter Real pMorningPeriod = 4.0;
+		parameter Real pDayPeriod = 7.0;
+		parameter Real pEveningPeriod = 6.0;
+		parameter Real pNightPeriod = 7.0;
+
+		event evMorningDay (delay = Dirac(pMorningPeriod));
+		event evDayEvening (delay = Dirac(pDayPeriod));
+		event evEveningNight(delay = Dirac(pEveningPeriod));
+		event evNightMorning (delay = Dirac(pNightPeriod));
+
+		event evSpringSummer (delay = Dirac(pSpringPeriod));
+		event evSummerAutumn (delay = Dirac(pSummerPeriod));
+		event evAutumnWinter (delay = Dirac(pAutumnPeriod));
+		event evWinterSpring (delay = Dirac(pWinterPeriod));
+
+		transition
+			evMorningDay: vsTime == MORNING -> vsTime := DAY;
+			evDayEvening: vsTime == DAY -> vsTime := EVENING;
+			evEveningNight: vsTime == EVENING -> vsTime := NIGHT;
+			evNightMorning: vsTime == NIGHT -> vsTime := MORNING;
+
+			evSpringSummer: vsSeason == SPRING -> vsSeason := SUMMER;
+			evSummerAutumn: vsSeason == SUMMER -> vsSeason := AUTUMN;
+			evAutumnWinter: vsSeason == AUTUMN -> vsSeason := WINTER;
+			evWinterSpring: vsSeason == WINTER -> vsSeason := SPRING;
+
+
+		assertion
+			vfProductionNeed := if vsSeason == SPRING then if vsTime == MORNING then pNormalDemand
+														else if vsTime == DAY then pLowDemand
+														else if vsTime == EVENING then pNormalDemand
+													    else pLowDemand
+							 else if vsSeason == SUMMER then if vsTime == MORNING then pLowDemand
+														else if vsTime == DAY then pLowDemand
+														else if vsTime == EVENING then pLowDemand
+													    else pNullDemand
+							 else if vsSeason == AUTUMN then if vsTime == MORNING then pNormalDemand
+														else if vsTime == DAY then pLowDemand
+														else if vsTime == EVENING then pNormalDemand
+													    else pLowDemand
+							else if vsTime == MORNING then pHighDemand
+							else if vsTime == DAY then pNormalDemand
+							else if vsTime == EVENING then pHighDemand
+							else pNormalDemand;
+		
+	end	// ProductionNeed
+
+	assertion
+		PowerProductionSystem.vfProductionNeedIn := ProductionNeed.vfProductionNeed;
+		PowerProductionSystem.vfWindForceIn := Wind.vfWindForceOut;
+
+    observer Real oProduction = PowerProductionSystem.vfProductionOut;
+    observer Real oProductionNeed = ProductionNeed.vfProductionNeed;
+	observer Real oDiffProdNeed = (PowerProductionSystem.vfProductionOut - ProductionNeed.vfProductionNeed);
+	observer Boolean oIsNeedSatisfied = PowerProductionSystem.vfProductionOut >= ProductionNeed.vfProductionNeed;
+
+/*
+	observer Boolean oANullWindNullNeed = Wind.vfWindForceOut == NULL and ProductionNeed.vfProductionNeed == 0.0;
+	observer Boolean oANullWindLowNeed = Wind.vfWindForceOut == NULL and ProductionNeed.vfProductionNeed == 1000.0;
+	observer Boolean oANullWindNormalNeed = Wind.vfWindForceOut == NULL and ProductionNeed.vfProductionNeed == 1500.0;
+	observer Boolean oANullWindHighNeed = Wind.vfWindForceOut == NULL and ProductionNeed.vfProductionNeed == 2000.0;
+
+	observer Boolean oALowWindNullNeed = Wind.vfWindForceOut == LOW and ProductionNeed.vfProductionNeed == 0.0;
+	observer Boolean oALowWindLowNeed = Wind.vfWindForceOut == LOW and ProductionNeed.vfProductionNeed == 1000.0;
+	observer Boolean oALowWindNormalNeed = Wind.vfWindForceOut == LOW and ProductionNeed.vfProductionNeed == 1500.0;
+	observer Boolean oALowWindHighNeed = Wind.vfWindForceOut == LOW and ProductionNeed.vfProductionNeed == 2000.0;
+
+	observer Boolean oANormalWindNullNeed = Wind.vfWindForceOut == NORMAL and ProductionNeed.vfProductionNeed == 0.0;
+	observer Boolean oANormalWindLowNeed = Wind.vfWindForceOut == NORMAL and ProductionNeed.vfProductionNeed == 1000.0;
+	observer Boolean oANormalWindNormalNeed = Wind.vfWindForceOut == NORMAL and ProductionNeed.vfProductionNeed == 1500.0;
+	observer Boolean oANormalWindHighNeed = Wind.vfWindForceOut == NORMAL and ProductionNeed.vfProductionNeed == 2000.0;
+
+	observer Boolean oAHighWindNullNeed = Wind.vfWindForceOut == HIGH and ProductionNeed.vfProductionNeed == 0.0;
+	observer Boolean oAHighWindLowNeed = Wind.vfWindForceOut == HIGH and ProductionNeed.vfProductionNeed == 1000.0;
+	observer Boolean oAHighWindNormalNeed = Wind.vfWindForceOut == HIGH and ProductionNeed.vfProductionNeed == 1500.0;
+	observer Boolean oAHighWindHighNeed = Wind.vfWindForceOut == HIGH and ProductionNeed.vfProductionNeed == 2000.0;
+
+	observer Boolean oAStormWindNullNeed = Wind.vfWindForceOut == STORM and ProductionNeed.vfProductionNeed == 0.0;
+	observer Boolean oAStormWindLowNeed = Wind.vfWindForceOut == STORM and ProductionNeed.vfProductionNeed == 1000.0;
+	observer Boolean oAStormWindNormalNeed = Wind.vfWindForceOut == STORM and ProductionNeed.vfProductionNeed == 1500.0;
+	observer Boolean oAStormWindHighNeed = Wind.vfWindForceOut == STORM and ProductionNeed.vfProductionNeed == 2000.0;
+
+	observer Boolean oIsNullWind = Wind.vfWindForceOut == NULL;
+	observer Boolean oIsLowWind = Wind.vfWindForceOut == LOW;
+	observer Boolean oIsNormalWind = Wind.vfWindForceOut == NORMAL;
+	observer Boolean oIsHighWind = Wind.vfWindForceOut == HIGH;
+	observer Boolean oIsStormWind = Wind.vfWindForceOut == STORM;
+
+	observer Integer oStayNull = Wind.vsStayNull;
+	observer Integer oIncreaseNull = Wind.vsIncreaseNull;
+	observer Integer oStayLow = Wind.vsStayLow;
+	observer Integer oIncreaseLow = Wind.vsIncreaseLow;
+	observer Integer oDecreaseLow = Wind.vsDecreaseLow;
+	observer Integer oStayNormal = Wind.vsStayNormal;
+	observer Integer oIncreaseNormal = Wind.vsIncreaseNormal;
+	observer Integer oDecreaseNormal = Wind.vsDecreaseNormal;
+	observer Integer oStayHigh = Wind.vsStayHigh;
+	observer Integer oIncreaseHigh = Wind.vsIncreaseHigh;
+	observer Integer oDecreaseHigh = Wind.vsDecreaseHigh;
+	observer Integer oStayStorm = Wind.vsStayStorm;
+	observer Integer oDecreaseStorm = Wind.vsDecreaseStorm;
+
+	observer Boolean oHasStartedMaintenance = PowerProductionSystem.Maintenance.vsHasStartedMaintenance != 0;
+	observer Boolean oHasFinishedMaintenance = PowerProductionSystem.Maintenance.vsHasFinishedMaintenance != 0;
+
+	observer Boolean oIsLine1Failed = PowerProductionSystem.Line1.vfIsFailed;
+	observer Boolean oIsLine2Failed = PowerProductionSystem.Line2.vfIsFailed;
+	observer Boolean oIsLine3Failed = PowerProductionSystem.Line3.vfIsFailed;
+	observer Boolean oIsLine4Failed = PowerProductionSystem.Line4.vfIsFailed;
+	observer Boolean oIsLine5Failed = PowerProductionSystem.Line5.vfIsFailed;
+	observer Boolean oIsElectricalSystemFailed = PowerProductionSystem.ElectricalSystem.vfIsFailed;
+
+	observer Boolean oNoAvailableRepairer = PowerProductionSystem.Maintenance.vsMaintenanceCrewAvailable == 0;
+
+	observer Boolean o1LineFailed = #(PowerProductionSystem.Line1.vfIsFailed , PowerProductionSystem.Line2.vfIsFailed ,
+									PowerProductionSystem.Line3.vfIsFailed , PowerProductionSystem.Line4.vfIsFailed ,
+									PowerProductionSystem.Line5.vfIsFailed) == 1;
+	observer Boolean o2LineFailed = #(PowerProductionSystem.Line1.vfIsFailed , PowerProductionSystem.Line2.vfIsFailed ,
+									PowerProductionSystem.Line3.vfIsFailed , PowerProductionSystem.Line4.vfIsFailed ,
+									PowerProductionSystem.Line5.vfIsFailed) == 2;
+	observer Boolean o3LineFailed = #(PowerProductionSystem.Line1.vfIsFailed , PowerProductionSystem.Line2.vfIsFailed ,
+									PowerProductionSystem.Line3.vfIsFailed , PowerProductionSystem.Line4.vfIsFailed ,
+									PowerProductionSystem.Line5.vfIsFailed) == 3;
+	observer Boolean o4LineFailed = #(PowerProductionSystem.Line1.vfIsFailed , PowerProductionSystem.Line2.vfIsFailed ,
+									PowerProductionSystem.Line3.vfIsFailed , PowerProductionSystem.Line4.vfIsFailed ,
+									PowerProductionSystem.Line5.vfIsFailed) == 4;
+	observer Boolean o5LineFailed = #(PowerProductionSystem.Line1.vfIsFailed , PowerProductionSystem.Line2.vfIsFailed ,
+									PowerProductionSystem.Line3.vfIsFailed , PowerProductionSystem.Line4.vfIsFailed ,
+									PowerProductionSystem.Line5.vfIsFailed) == 5;
+
+	observer Boolean oOneComponentFailed = PowerProductionSystem.Line1.WM1.vsState == FAILED or PowerProductionSystem.Line1.WM2.vsState == FAILED or
+										PowerProductionSystem.Line1.WM3.vsState == FAILED or PowerProductionSystem.Line1.WM4.vsState == FAILED or
+										PowerProductionSystem.Line1.WM5.vsState == FAILED or PowerProductionSystem.Line1.C1.vsState == FAILED or
+										PowerProductionSystem.Line1.C2.vsState == FAILED or PowerProductionSystem.Line1.C3.vsState == FAILED or
+										PowerProductionSystem.Line1.C4.vsState == FAILED or PowerProductionSystem.Line1.C5.vsState == FAILED or
+										
+										PowerProductionSystem.Line2.WM1.vsState == FAILED or PowerProductionSystem.Line2.WM2.vsState == FAILED or
+										PowerProductionSystem.Line2.WM3.vsState == FAILED or PowerProductionSystem.Line2.WM4.vsState == FAILED or
+										PowerProductionSystem.Line2.WM5.vsState == FAILED or PowerProductionSystem.Line2.C1.vsState == FAILED or
+										PowerProductionSystem.Line2.C2.vsState == FAILED or PowerProductionSystem.Line2.C3.vsState == FAILED or
+										PowerProductionSystem.Line2.C4.vsState == FAILED or PowerProductionSystem.Line2.C5.vsState == FAILED or
+
+										PowerProductionSystem.Line3.WM1.vsState == FAILED or PowerProductionSystem.Line3.WM2.vsState == FAILED or
+										PowerProductionSystem.Line3.WM3.vsState == FAILED or PowerProductionSystem.Line3.WM4.vsState == FAILED or
+										PowerProductionSystem.Line3.WM5.vsState == FAILED or PowerProductionSystem.Line3.C1.vsState == FAILED or
+										PowerProductionSystem.Line3.C2.vsState == FAILED or PowerProductionSystem.Line3.C3.vsState == FAILED or
+										PowerProductionSystem.Line3.C4.vsState == FAILED or PowerProductionSystem.Line3.C5.vsState == FAILED or
+
+										PowerProductionSystem.Line4.WM1.vsState == FAILED or PowerProductionSystem.Line4.WM2.vsState == FAILED or
+										PowerProductionSystem.Line4.WM3.vsState == FAILED or PowerProductionSystem.Line4.WM4.vsState == FAILED or
+										PowerProductionSystem.Line4.WM5.vsState == FAILED or PowerProductionSystem.Line4.C1.vsState == FAILED or
+										PowerProductionSystem.Line4.C2.vsState == FAILED or PowerProductionSystem.Line4.C3.vsState == FAILED or
+										PowerProductionSystem.Line4.C4.vsState == FAILED or PowerProductionSystem.Line4.C5.vsState == FAILED or
+
+										PowerProductionSystem.Line5.WM1.vsState == FAILED or PowerProductionSystem.Line5.WM2.vsState == FAILED or
+										PowerProductionSystem.Line5.WM3.vsState == FAILED or PowerProductionSystem.Line5.WM4.vsState == FAILED or
+										PowerProductionSystem.Line5.WM5.vsState == FAILED or PowerProductionSystem.Line5.C1.vsState == FAILED or
+										PowerProductionSystem.Line5.C2.vsState == FAILED or PowerProductionSystem.Line5.C3.vsState == FAILED or
+										PowerProductionSystem.Line5.C4.vsState == FAILED or PowerProductionSystem.Line5.C5.vsState == FAILED;
+*/
+
+end

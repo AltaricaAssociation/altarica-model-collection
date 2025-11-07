@@ -1,0 +1,12 @@
+domain componentState { STANDBY, WORKING, FAILED}
+
+block SpareComponent
+    componentState s (init = WORKING);
+    event turnOn, turnOff, failureOnDemand, failure, repair;
+	transition
+    	turnOn: s == STANDBY -> s := WORKING;
+    	failureOnDemand: s == STANDBY -> s := FAILED;
+    	turnOff: s == WORKING -> s := STANDBY;
+    	failure:  s == WORKING -> s := FAILED;
+    	repair:  s == FAILED -> s := STANDBY;
+end

@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="NetworkComputersPrinterSystem">
+    <file path="NetworkComputersPrinterSystem.alt" name="NetworkComputersPrinterSystem.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

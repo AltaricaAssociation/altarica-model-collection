@@ -1,0 +1,23 @@
+domain EngineState { WORKING, FAILED, IN_REPAIR }
+domain RepairManState { FREE, BUSY }
+
+block MyNet
+  EngineState engine (init = WORKING);
+  RepairManState repairMan (init = FREE);
+  Integer counter (init = 0);
+
+  event failure (delay = exponential(lambda));
+  event startRepair (delay = 0);
+  event endRepair (delay = exponential(mu));
+
+  parameter Real lambda = 1.0e-3;
+  parameter Real mu = 1.0e-1;
+
+transition
+	failure: engine==WORKING ->  engine := FAILED; 
+
+	startRepair: engine==FAILED and repairMan==FREE -> {engine := IN_REPAIR; repairMan := BUSY; }
+
+	endRepair: engine==IN_REPAIR and repairMan==BUSY -> {engine := WORKING; repairMan := FREE; counter:= counter+1;}
+end
+

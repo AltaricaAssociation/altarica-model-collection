@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="CompositionModel_2components">
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+    <file path="two_Component.alt" name="two_Component.alt"/>
+</project>

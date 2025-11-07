@@ -1,0 +1,49 @@
+class PowerSource
+	Boolean working (init = true);
+	Boolean powerOut (reset = false);
+	event failure,  repair;
+	transition
+		failure:  working -> working := false;
+		repair:  not working -> working := true;
+	assertion
+		powerOut := working;
+end
+
+domain switchPosition { UP, DOWN }
+
+class Switch // assumed no to fail
+	switchPosition channel (init = UP);
+	Boolean leftPower (reset = false);
+	Boolean rightPowerUp (reset = false);
+	Boolean rightPowerDown (reset = false);
+  event push, failure;
+  transition
+    push: channel==UP -> channel:= DOWN;
+	push: channel==DOWN -> channel:= DOWN;
+assertion
+    if channel == UP then leftPower :=: rightPowerUp;
+	if channel == DOWN then leftPower :=: rightPowerDown;
+end
+
+
+class Lamp
+  Boolean working (init = true);
+  Boolean powerIn, lighted (reset = false);
+  event failure;
+  transition
+    failure:  working -> working := false;
+  assertion
+    lighted := working and powerIn;
+ end
+
+block Network
+  PowerSource P;
+  Switch S1, S2;
+  Lamp L;
+  assertion
+     S1.leftPower :=: P.powerOut;
+     S1.rightPowerUp :=: S2.rightPowerUp;
+     S1. rightPowerDown :=: S2. rightPowerDown ;
+     L.powerIn := S2.leftPower ;
+end
+

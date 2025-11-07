@@ -1,0 +1,137 @@
+/*
+ * =============================================================================
+ *  COPYRIGHT (c) 2014-2025 - AltaRica Association
+ * =============================================================================
+ *
+ *  Project: "MaintenanceCombination"
+ *
+ * =============================================================================
+ *  All rights reserved.
+ *  Unauthorized copying of this file, via any medium, is strictly prohibited.
+ *  The content of this file is proprietary and confidential.
+ * =============================================================================
+ */
+
+
+class Grid
+    Boolean vfOutflow (reset = false);
+    assertion
+        vfOutflow := true;
+end
+
+class RepairableComponent
+    Boolean vsWorking (init = true);
+    parameter Real pLambda = 0.00001;
+    parameter Real pMu = 0.001;
+    event evFailure (delay = exponential(pLambda));
+    event evRepair (delay = exponential(pMu));
+    transition
+        evFailure: vsWorking -> vsWorking := false;
+        evRepair: not vsWorking -> vsWorking := true;
+end
+
+class CircuitBreaker
+    extends RepairableComponent;
+    Boolean vfUpflow, vfDownflow (reset = false);
+    assertion
+        if vsWorking then vfDownflow :=: vfUpflow;
+end
+
+domain SpareComponentState {WORKING, FAILED, STANDBY}
+
+class SpareComponent
+	SpareComponentState vs (init = WORKING);
+	Boolean vfDemanded (reset = false);
+	parameter Real pLambda = 0.0001;
+	parameter Real pExpectationOnStart = 0.0001;
+	event evFailure (delay = exponential(pLambda));
+	event evFailureOnDemand (delay = Dirac(0.0), expectation = pExpectationOnStart);
+	event evStart (delay = Dirac(0.0), expectation = 1 - pExpectationOnStart);
+	transition
+		evFailure: vs == WORKING -> vs := FAILED;
+		evFailureOnDemand: vs == STANDBY and vfDemanded -> vs := FAILED;
+		evStart: vs == STANDBY and vfDemanded -> vs := WORKING;
+end
+
+class SpareTransformer
+	extends SpareComponent;
+	Boolean vfInflow, vfOutflow (reset = false);
+	assertion
+		vfOutflow := (vs == WORKING) and vfInflow;
+end
+
+class SpareDieselGenerator
+	extends SpareComponent;
+	Boolean vfOutflow (reset = false);
+	assertion
+		vfOutflow := (vs == WORKING);
+end
+
+block PowerSupplySystem
+
+	block PrimaryPowerSupply
+	
+		Boolean vfOutflow (reset = false);
+		Grid GR;
+		
+		block Line1
+			Boolean vfInflow, vfOutflow (reset = false);
+			SpareCircuitBreaker CBU, CBD;
+			SpareTransformer TR;
+			assertion
+				CBU.vfUpflow := vfInflow;
+				TR.vfInflow := CBU.vfDownflow;
+				CBD.vfUpflow := TR.vfOutflow;
+				vfOutflow := CBD.vfDownflow;
+		end
+		
+		block Line2
+			Boolean vfInflow, vfOutflow (reset = false);
+			SpareCircuitBreaker CBU, CBD (vs.init = STANDBY);
+			SpareTransformer TR (vs.init = STANDBY);
+			assertion
+				CBU.vfUpflow := vfInflow;
+				TR.vfInflow := CBU.vfDownflow;
+				CBD.vfUpflow := TR.vfOutflow;
+				vfOutflow := CBD.vfDownflow;
+		end
+		
+		parameter Real pLambdaCCF = 1.0e-5;
+		event evCCF (delay = exponential(pLambdaCCF));
+		
+		transition
+			evCCF: ?Line1.TR.evFailure & ?Line2.TR.evFailure;
+		
+		assertion
+			Line1.vfInflow := GR.vfOutflow;
+			Line2.vfInflow := GR.vfOutflow;
+			Line2.TR.vfDemanded := not Line1.vfOutflow;
+			Line2.CBU.vfDemanded := not Line1.vfOutflow;
+			Line2.CBD.vfDemanded := not Line1.vfOutflow;
+			vfOutflow := Line1.vfOutflow or Line2.vfOutflow;	
+	end
+	
+	block BackupPowerSupply
+		Boolean vfOutflow (reset = false);
+		SpareDieselGenerator DG (vs.init = STANDBY);
+		SpareCircuitBreaker CB (vs.init = STANDBY);
+		assertion
+			CB.vfUpflow := DG.vfOutflow;
+			vfOutflow := CB.vfDownflow;
+	end
+
+	block Busbar
+	    Boolean vfInFlow (reset = false);
+	end
+
+	assertion
+		BackupPowerSupply.DG.vfDemanded := not PrimaryPowerSupply.vfOutflow;
+		BackupPowerSupply.CB.vfDemanded := not PrimaryPowerSupply.vfOutflow;
+        Busbar.vfInFlow := PrimaryPowerSupply.Line1.CBD.vfDownflow 
+                           or PrimaryPowerSupply.Line2.CBD.vfDownflow 
+                           or BackupPowerSupply.CB.vfDownflow;
+		
+	observer Boolean topEvent = Busbar.vfInFlow == false;
+
+end
+ 

@@ -1,0 +1,168 @@
+/*
+ * =============================================================================
+ *  COPYRIGHT (c) 2014-2025 - AltaRica Association
+ * =============================================================================
+ *
+ *  Project: "HIPPSSystems"
+ *
+ * =============================================================================
+ *  All rights reserved.
+ *  Unauthorized copying of this file, via any medium, is strictly prohibited.
+ *  The content of this file is proprietary and confidential.
+ * =============================================================================
+ */
+
+
+//
+// For stochastic simulation:
+//	- mission time: 43800.00 (hours = 5 years)
+//  - time instants of observation (every years): 8760.00; 17520.00; 26280.00; 35040.00
+//
+
+domain PressureFlow {NULL, NORMAL, OVER}
+
+class RComponent
+	Boolean vsWorking (init = true);
+	parameter Real pFailure = 1.0e-4;
+	parameter Real pRepair = 1.0e-2;
+	event evFailure (delay = exponential(pFailure));
+	event evRepair (delay = exponential(pRepair));
+	transition
+		evFailure: vsWorking -> vsWorking := false;	
+		evRepair: not vsWorking -> vsWorking := true;	
+end
+
+class Sensor
+	extends RComponent;
+	PressureFlow vfIn, vfOut (reset = NULL);
+	assertion
+		vfOut := if vsWorking then vfIn else NULL;
+end
+
+class DataAcquisition
+	extends RComponent;
+	PressureFlow vfIn (reset = NULL);
+	Boolean vfOut (reset = false);
+	assertion
+		vfOut := vsWorking and vfIn == OVER;
+end
+
+block System
+
+	block Well
+		Boolean vsIsOverPressure (init = false);
+		PressureFlow vfOut (reset = NULL);
+		parameter Real pOverPressure = 1.0e-2;
+		parameter Real pNormalPressure = 1.0;
+		event evOverPressure (delay = exponential(pOverPressure));
+		event evNormalPressure (delay = exponential(pNormalPressure));
+		transition
+			evOverPressure: not vsIsOverPressure -> vsIsOverPressure := true;
+			evNormalPressure: vsIsOverPressure -> vsIsOverPressure := false;
+		assertion
+			vfOut := if vsIsOverPressure then OVER else NORMAL;
+	end
+
+	block ManualValve
+		Boolean vsIsOpened (init = true);
+		PressureFlow vfIn, vfOut (reset = NULL);
+		assertion
+			vfOut := if vsIsOpened then vfIn else NULL;
+	end
+
+	block Separator
+		PressureFlow vfIn (reset = NULL);
+	end
+
+	block Hipps
+
+		Sensor PS1, PS2, PS3 (pFailure = 1.0e-5);
+
+		block Controller
+
+			DataAcquisition DACQ1, DACQ2, DACQ3 (pFailure = 1.0e-6);
+			parameter Real pCCF = 1.0e-8;
+			event evCCF (delay = exponential(pCCF));
+			transition
+				evCCF: ?DACQ1.evFailure & ?DACQ2.evFailure & ?DACQ3.evFailure;
+
+			block LogicSolver
+				extends RComponent (pFailure = 1.0e-8);
+				Boolean vfIn1, vfIn2, vfIn3 (reset = false);
+				Boolean vfOut (reset = false); // value 'true' correponds to close the shut-down valve, thus to open the solenoid valve
+				assertion
+					vfOut := if vsWorking then (vfIn1 and vfIn2) or (vfIn1 and vfIn3) or (vfIn2 and vfIn3)
+								else false;
+			end
+
+			block ORD
+				extends RComponent (pFailure = 1.0e-6);
+				Boolean vfIn, vfOut (reset = false);
+				assertion
+					vfOut := vsWorking and vfIn;
+			end
+			
+			assertion
+				LogicSolver.vfIn1 := DACQ1.vfOut;
+				LogicSolver.vfIn2 := DACQ2.vfOut;
+				LogicSolver.vfIn3 := DACQ3.vfOut;
+				ORD.vfIn := LogicSolver.vfOut; 
+
+		end
+
+		block Actuators
+			block SolenoidValve
+				extends RComponent (pFailure = 1.0e-6);
+				Boolean vsIsClosed (init = true);
+				Boolean vfToOpen (reset = false);
+				PressureFlow vfIn, vfOut (reset = NULL);
+				parameter Real pFailToOpen = 1.0e-4;
+				event evOpen (delay = Dirac(0.0) , expectation = 1.0 - pFailToOpen);
+				event evFailToOpen (delay = Dirac(0.0) , expectation = pFailToOpen);
+				transition
+					evOpen: vsWorking and vsIsClosed and vfToOpen -> vsIsClosed := false;
+					evFailToOpen: vsWorking and vsIsClosed and vfToOpen -> vsWorking := false;				
+				assertion
+					vfOut := if not vsIsClosed then vfIn else NULL;
+			end
+
+			block ShutDownValve
+				extends RComponent (pFailure = 1.0e-7);
+				Boolean vsIsOpened (init = true);
+				Boolean vfToClose (reset = false);
+				PressureFlow vfIn, vfOut (reset = NULL);
+				parameter Real pFailToClose = 1.0e-4;
+				event evClose (delay = Dirac(0.0) , expectation = 1.0 - pFailToClose);
+				event evFailToClose (delay = Dirac(0.0) , expectation = pFailToClose);
+				transition
+					evClose: vsWorking and vsIsOpened and vfToClose -> vsIsOpened := false;
+					evFailToClose: vsWorking and vsIsOpened and vfToClose -> vsWorking := false;
+				assertion
+					vfOut := if vsIsOpened then vfIn else NULL;
+			end
+
+			assertion
+				ShutDownValve.vfToClose := SolenoidValve.vfOut == OVER;
+				
+		end
+
+		assertion
+			Controller.DACQ1.vfIn := PS1.vfOut;
+			Controller.DACQ2.vfIn := PS2.vfOut;
+			Controller.DACQ3.vfIn := PS3.vfOut;
+			Actuators.SolenoidValve.vfToOpen := Controller.ORD.vfOut;
+			Actuators.SolenoidValve.vfIn := Actuators.ShutDownValve.vfOut;
+
+	end
+
+	assertion
+		Hipps.Actuators.ShutDownValve.vfIn := Well.vfOut;
+		Hipps.PS1.vfIn := Hipps.Actuators.ShutDownValve.vfOut;
+		Hipps.PS2.vfIn := Hipps.Actuators.ShutDownValve.vfOut;
+		Hipps.PS3.vfIn := Hipps.Actuators.ShutDownValve.vfOut;
+		ManualValve.vfIn := Hipps.Actuators.ShutDownValve.vfOut;
+		Separator.vfIn := ManualValve.vfOut;
+
+	observer Boolean oSeparatorOverPressure = Separator.vfIn == OVER;
+
+end

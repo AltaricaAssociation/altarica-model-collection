@@ -1,0 +1,23 @@
+class Wheel
+  Integer count (init = 0);
+  event increment, turn, reset;
+  transition
+      increment: count<9 -> count := count+1;
+      turn:  count==9 -> count := 0;
+      reset: true -> count := 0;
+end
+
+block Meter
+   Wheel W0, W1, W2;
+   event increment, resetMeter;
+   transition
+       increment:
+             !W0.increment
+          | !W0.turn & !W1.increment
+          | !W0.turn & !W1.turn & !W2.increment
+          | !W0.turn & !W1.turn & !W2.turn;
+		resetMeter: !W0.reset &!W1.reset & !W2.reset;
+		hide W0.increment, W0.turn, W0.reset;
+  		hide W1.increment, W1.turn, W1.reset;
+ 		hide W2.increment, W2.turn, W2.reset;
+end

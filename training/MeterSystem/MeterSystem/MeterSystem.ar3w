@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="MeterSystem">
+    <file path="MeterSystem.alt" name="MeterSystem.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

@@ -1,0 +1,5 @@
+<!DOCTYPE AltaRicaWizard>
+<project name="CompositionModel_2components_CCF+CommunRepair">
+    <file path="CompositionModel_2components_CCF+CommunRepair.alt" name="CompositionModel_2components_CCF+CommunRepair.alt"/>
+    <file path="RepairableComponent.gts" name="RepairableComponent.gts"/>
+</project>

@@ -1,0 +1,14 @@
+block Valve
+	Boolean working (init = true);
+	Boolean closed (init = true);
+	Boolean leftFlow, rightFlow (reset = false); 
+	event open, close, failure, repair;
+
+	transition
+		open: working and  closed -> closed := false;
+		close: working and  not closed -> closed := true;
+		failure : working -> working := false;
+		repair : not working -> working := true;
+	assertion
+		if not closed then leftFlow :=: rightFlow;
+end
