@@ -10,13 +10,13 @@ It gathers models used in **training sessions**, **teaching materials**, and **s
 This library includes:
 
 - **Training models**  
-  Models used in courses, tutorials, and hands-on sessions to teach the AltaRica 3.0 language, safety modelling, risk assessment, and model-based dependability analysis.
+  Small and easy-to-understand models used in courses, tutorials, and hands-on sessions.  
+  These models are **not fully documented yet**, but they are designed to be simple and intuitive for learning the basics of AltaRica 3.0, safety modelling, risk assessment, and model-based dependability analysis.
 
 - **Research models**  
-  Models developed and published in **scientific papers**, illustrating real case studies or methodological advances.
+  Models developed and published in **scientific papers**, illustrating real case studies or methodological advances.  
+  Each research model is provided together with its **associated scientific article** (reference or link when available), enabling reproducibility and deeper understanding.
 
-- **Reference examples**  
-  Classic benchmark models and simplified systems used as demonstrations.
 
 All models are provided as **open-access resources** for education, research, and community contributions.
 
@@ -41,9 +41,6 @@ All models are provided as **open-access resources** for education, research, an
 ### research <br>
 ├── Models from published scientific papers<br>
 └── Benchmark and reproducibility packages
-
-### examples <br>
-└── Small, self-contained models for demonstration
 
 (Structure will evolve as more models are added.)
 
